@@ -45,8 +45,8 @@ class GPInterp(nn.Module):
         # For the initialization, we are going to scatter `num_coords` across `h` x `w` grid
         grid_h = round(h * downsample_factor)
         grid_w = round(w * downsample_factor)
-        mean_x = torch.linspace(0, w, grid_w).unsqueeze(0).repeat(grid_h, 1).float() # [grid_h, grid_w]
-        mean_y = torch.linspace(0, h, grid_h).unsqueeze(1).repeat(1, grid_w).float() # [grid_h, grid_w]
+        mean_x = torch.linspace(0, w - 1, grid_w).unsqueeze(0).repeat(grid_h, 1).float() # [grid_h, grid_w]
+        mean_y = torch.linspace(0, h - 1, grid_h).unsqueeze(1).repeat(1, grid_w).float() # [grid_h, grid_w]
         means = torch.stack([mean_x, mean_y]).permute(1, 2, 0).view(-1, 2) # [num_coords, 2]
         stds = torch.ones_like(means) * std_scale # [num_coords, 2]
 
