@@ -27,6 +27,21 @@ __device__ __forceinline__ scalar_t compute_gaussian_density(
 
 
 template <typename scalar_t>
+__device__ __forceinline__ scalar_t d_normal_pdf_d_mu_i(
+    scalar_t x, scalar_t mean_x, scalar_t std_x, scalar_t density_value) {
+
+    return density_value * (x - mean_x) / (std_x * std_x);
+}
+
+
+template <typename scalar_t>
+__device__ __forceinline__ scalar_t d_normal_pdf_d_std_i(
+    scalar_t x, scalar_t mean_x, scalar_t std_x, scalar_t density_value) {
+    return -density_value * (x - mean_x) * (x - mean_x) / (std_x * std_x * std_x * std_x);
+}
+
+
+template <typename scalar_t>
 __device__ __forceinline__ scalar_t compute_distance_weight(
     scalar_t x, scalar_t y,
     scalar_t mean_x, scalar_t mean_y) {
@@ -39,10 +54,10 @@ __device__ __forceinline__ scalar_t compute_distance_weight(
     return weight;
 }
 
+
 template <typename scalar_t>
-__device__ scalar_t clamp(scalar_t x, scalar_t min_val, scalar_t max_val)
-{
-  return max(min_val, min(max_val, x));
+__device__ scalar_t clamp(scalar_t x, scalar_t min_val, scalar_t max_val) {
+    return max(min_val, min(max_val, x));
 }
 
 
@@ -122,7 +137,54 @@ __global__ void gp_interp_cuda_backward_kernel(
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_means,
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_stds) {
 
-    //...
+    const int point_idx = blockDim.y * blockIdx.y + blockIdx.x;
+    const int radius = blockDim.x / 2;
+    const int center_x = static_cast<int>(clamp(round(means[point_idx][0]), static_cast<scalar_t>(0.0), static_cast<scalar_t>(image.size(2))));
+    const int center_y = static_cast<int>(clamp(round(means[point_idx][1]), static_cast<scalar_t>(0.0), static_cast<scalar_t>(image.size(1))));
+    const int shift_x = threadIdx.x - radius;
+    const int shift_y = threadIdx.y - radius;
+    const int pixel_pos_x = center_x + shift_x;
+    const int pixel_pos_y = center_y + shift_y;
+
+    if (pixel_pos_x >= 0 && pixel_pos_y >= 0 && pixel_pos_x < image.size(2) && pixel_pos_y < image.size(1)) {
+        scalar_t weight = compute_gaussian_density(
+            static_cast<scalar_t>(pixel_pos_x),
+            static_cast<scalar_t>(pixel_pos_y),
+            means[point_idx][0],
+            means[point_idx][1],
+            stds[point_idx][0],
+            stds[point_idx][1]);
+        scalar_t total_weight = pixel_weights[pixel_pos_y][pixel_pos_x];
+
+        if (weight > 0.0 && total_weight > 0.0) {
+            scalar_t d_v_d_mu_x = 0.0;
+            scalar_t d_v_d_mu_y = 0.0;
+            scalar_t d_v_d_std_x = 0.0;
+            scalar_t d_v_d_std_y = 0.0;
+
+            scalar_t d_weight_d_mu_x = (1.0 / total_weight - weight) * d_normal_pdf_d_mu_i(
+                static_cast<scalar_t>(pixel_pos_x), means[point_idx][0], stds[point_idx][0], weight);
+            scalar_t d_weight_d_mu_y = (1.0 / total_weight - weight) * d_normal_pdf_d_mu_i(
+                static_cast<scalar_t>(pixel_pos_y), means[point_idx][1], stds[point_idx][1], weight);
+            scalar_t d_weight_d_std_x = (1.0 / total_weight - weight) * d_normal_pdf_d_std_i(
+                static_cast<scalar_t>(pixel_pos_x), means[point_idx][0], stds[point_idx][0], weight);
+            scalar_t d_weight_d_std_y = (1.0 / total_weight - weight) * d_normal_pdf_d_std_i(
+                static_cast<scalar_t>(pixel_pos_y), means[point_idx][1], stds[point_idx][1], weight);
+
+            for (int c = 0; c < image.size(0); c++) {
+                const scalar_t color_value = image[c][center_y][center_x]; // TODO: keep the color in the shared memory
+                d_v_d_mu_x += color_value * d_weight_d_mu_x;
+                d_v_d_mu_y += color_value * d_weight_d_mu_y;
+                d_v_d_std_x += color_value * d_weight_d_std_x;
+                d_v_d_std_y += color_value * d_weight_d_std_y;
+            }
+
+            atomicAdd(&grad_means[point_idx][0], d_v_d_mu_x);
+            atomicAdd(&grad_means[point_idx][1], d_v_d_mu_y);
+            atomicAdd(&grad_stds[point_idx][0], d_v_d_std_x);
+            atomicAdd(&grad_stds[point_idx][1], d_v_d_std_y);
+        }
+    }
 }
 } // namespace
 
