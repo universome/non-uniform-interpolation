@@ -40,7 +40,7 @@ class GPInterpFunction(Function):
 
 
 class GPInterp(nn.Module):
-    def __init__(self, h: int, w: int, c: int, downsample_factor: float, std_scale: float, radius: int):
+    def __init__(self, h: int, w: int, downsample_factor: float, std_scale: float, radius: int, noise_scale: float=0.0):
         super(GPInterp, self).__init__()
         # For the initialization, we are going to scatter `num_coords` across `h` x `w` grid
         grid_h = round(h * downsample_factor)
@@ -51,8 +51,8 @@ class GPInterp(nn.Module):
         stds = torch.ones_like(means) * std_scale # [num_coords, 2]
 
         # Let's break the symmetry in the init
-        means = means + torch.rand_like(means) * 0.0001
-        stds = stds + torch.rand_like(stds) * 0.0001
+        means = means + torch.rand_like(means) * noise_scale
+        stds = stds + torch.rand_like(stds) * noise_scale
 
         self.means = nn.Parameter(means)
         self.stds = nn.Parameter(stds)

@@ -37,7 +37,10 @@ __device__ __forceinline__ scalar_t d_normal_pdf_d_mu_i(
 template <typename scalar_t>
 __device__ __forceinline__ scalar_t d_normal_pdf_d_std_i(
     scalar_t x, scalar_t mean_x, scalar_t std_x, scalar_t density_value) {
-    return -density_value * (x - mean_x) * (x - mean_x) / (std_x * std_x * std_x * std_x);
+    const auto d_denom_term = -density_value / std_x;
+    const auto d_exp_term = density_value * (x - mean_x) * (x - mean_x) / (std_x * std_x * std_x);
+
+    return d_denom_term + d_exp_term;
 }
 
 
@@ -156,7 +159,7 @@ __global__ void gp_interp_cuda_backward_kernel(
             stds[point_idx][1]);
         scalar_t total_weight = pixel_weights[pixel_pos_y][pixel_pos_x];
 
-        if (weight > 0.0 && total_weight > 0.0) {
+        if (weight > 0.0) {
             scalar_t d_v_d_mu_x = 0.0;
             scalar_t d_v_d_mu_y = 0.0;
             scalar_t d_v_d_std_x = 0.0;
@@ -211,11 +214,6 @@ std::vector<torch::Tensor> gp_interp_cuda_forward(
             pixel_weights.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>());
         }));
         AT_CUDA_CHECK(cudaGetLastError());
-
-        // cudaError_t err = cudaGetLastError();
-        // if (err != cudaSuccess) {
-        //     printf("CUDA ERROR: %s\n", cudaGetErrorString(err));
-        // }
     }
 
     {
@@ -227,11 +225,6 @@ std::vector<torch::Tensor> gp_interp_cuda_forward(
             pixel_weights.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>());
         }));
         AT_CUDA_CHECK(cudaGetLastError());
-
-        // cudaError_t err = cudaGetLastError();
-        // if (err != cudaSuccess) {
-        //     printf("CUDA ERROR: %s\n", cudaGetErrorString(err));
-        // }
     }
 
     return {output_image, pixel_weights};
