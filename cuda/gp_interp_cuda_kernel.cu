@@ -95,6 +95,7 @@ __global__ void gp_interp_compute_color_kernel(
         //     static_cast<scalar_t>(pixel_pos_y),
         //     means[point_idx][0],
         //     means[point_idx][1]);
+        // scalar_t weight = means[point_idx][0] + means[point_idx][1];
 
         if (weight > 0.0) {
             for (int c = 0; c < image.size(0); c++) {
@@ -165,21 +166,25 @@ __global__ void gp_interp_cuda_backward_kernel(
             scalar_t d_v_d_std_x = 0.0;
             scalar_t d_v_d_std_y = 0.0;
 
-            scalar_t d_weight_d_mu_x = (1.0 / total_weight - weight) * d_normal_pdf_d_mu_i(
+            scalar_t common_multiplier = (1.0 - weight / total_weight) / total_weight;
+            // scalar_t common_multiplier = 1.0 / total_weight;
+            scalar_t d_weight_d_mu_x = common_multiplier * d_normal_pdf_d_mu_i(
                 static_cast<scalar_t>(pixel_pos_x), means[point_idx][0], stds[point_idx][0], weight);
-            scalar_t d_weight_d_mu_y = (1.0 / total_weight - weight) * d_normal_pdf_d_mu_i(
+            scalar_t d_weight_d_mu_y = common_multiplier * d_normal_pdf_d_mu_i(
                 static_cast<scalar_t>(pixel_pos_y), means[point_idx][1], stds[point_idx][1], weight);
-            scalar_t d_weight_d_std_x = (1.0 / total_weight - weight) * d_normal_pdf_d_std_i(
+            scalar_t d_weight_d_std_x = common_multiplier * d_normal_pdf_d_std_i(
                 static_cast<scalar_t>(pixel_pos_x), means[point_idx][0], stds[point_idx][0], weight);
-            scalar_t d_weight_d_std_y = (1.0 / total_weight - weight) * d_normal_pdf_d_std_i(
+            scalar_t d_weight_d_std_y = common_multiplier * d_normal_pdf_d_std_i(
                 static_cast<scalar_t>(pixel_pos_y), means[point_idx][1], stds[point_idx][1], weight);
 
             for (int c = 0; c < image.size(0); c++) {
-                const scalar_t color_value = image[c][center_y][center_x]; // TODO: keep the color in the shared memory
-                d_v_d_mu_x += color_value * d_weight_d_mu_x;
-                d_v_d_mu_y += color_value * d_weight_d_mu_y;
-                d_v_d_std_x += color_value * d_weight_d_std_x;
-                d_v_d_std_y += color_value * d_weight_d_std_y;
+                const scalar_t color_value = image[c][center_y][center_x]; // TODO: keep the color in the shared memory?
+                const scalar_t d_loss_d_pixel_color = grad_output_image[c][pixel_pos_y][pixel_pos_x];
+
+                d_v_d_mu_x += d_loss_d_pixel_color * color_value * d_weight_d_mu_x;
+                d_v_d_mu_y += d_loss_d_pixel_color * color_value * d_weight_d_mu_y;
+                d_v_d_std_x += d_loss_d_pixel_color * color_value * d_weight_d_std_x;
+                d_v_d_std_y += d_loss_d_pixel_color * color_value * d_weight_d_std_y;
             }
 
             atomicAdd(&grad_means[point_idx][0], d_v_d_mu_x);
@@ -202,7 +207,7 @@ std::vector<torch::Tensor> gp_interp_cuda_forward(
     auto pixel_weights = torch::zeros({image.size(1), image.size(2)}).to(output_image.device()).contiguous();
 
     {
-        const dim3 threads(radius * 2, radius * 2);
+        const dim3 threads(radius * 2 + 1, radius * 2 + 1);
         const int blocks = num_points;
 
         AT_DISPATCH_FLOATING_TYPES(image.type(), "gp_interp_compute_color_kernel", ([&] {
@@ -244,7 +249,7 @@ std::vector<torch::Tensor> gp_interp_cuda_backward(
     auto grad_means = torch::zeros_like(means).contiguous();
     auto grad_stds = torch::zeros_like(stds).contiguous();
 
-    const dim3 threads(radius * 2, radius * 2);
+    const dim3 threads(radius * 2 + 1, radius * 2 + 1);
     const auto num_points = means.size(0);
     const int blocks = num_points;
 
