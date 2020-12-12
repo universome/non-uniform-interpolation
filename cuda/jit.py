@@ -15,9 +15,9 @@ import torchvision.transforms.functional as TVF
 from gp_interp import GPInterp
 
 device = 'cuda'
-img_pil = Image.open('/tmp/skoroki/datasets/ffhq/thumbnails128x128/00000.png')
+img_pil = Image.open('./water.jpg')
 img = TVF.to_tensor(img_pil).to(device)
-gp = GPInterp(img.shape[1], img.shape[2], img.shape[0], 0.25, 1.0, 5)
+gp = GPInterp(img.shape[1], img.shape[2], 0.2, 2.0, 5)
 gp.to(device)
 
 print('Num coords:', len(gp.means))
