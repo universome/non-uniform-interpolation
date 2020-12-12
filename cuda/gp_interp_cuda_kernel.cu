@@ -86,8 +86,8 @@ __device__ scalar_t compute_color_bilinear(
     // Computing the derivative here is relatively easy
     // Since it is a linear function wrt to mu_x and mu_y,
     // We just replace them with ones in those places where they are used
-    scalar_t w_top = (use_d_y ? 1.0 : y) - static_cast<scalar_t>(i);
-    scalar_t w_left = (use_d_x ? 1.0 : x) - static_cast<scalar_t>(j);
+    scalar_t w_top = use_d_y ? 1.0 : (y - static_cast<scalar_t>(i));
+    scalar_t w_left = use_d_x ? 1.0 : (x - static_cast<scalar_t>(j));
 
     // Step 1: interpolate along x-axis
     scalar_t color_top = c0 * (1.0 - w_left) + c1 * w_left;
